@@ -7,6 +7,11 @@ import mechanize
 import re
 import sys
 import os.path
+import getpass
+import netrc
+import platform
+import os
+import argparse
 from bs4 import BeautifulSoup
 from math import floor
 from random import random
@@ -51,6 +56,44 @@ def csrfCookie(csrftoken):
             comment=None, comment_url=None,
             rest={'HttpOnly': None}, rfc2109=False)
 
+
+def get_netrc_creds(authenticator):
+    """
+    Read username/password from the users' netrc file. Returns None if no
+    coursera credentials can be found.
+    """
+    # inspired by https://github.com/jplehmann/coursera
+    # taken from  https://github.com/dgorissen/coursera-dl
+
+    if platform.system() == 'Windows':
+        # where could the netrc file be hiding, try a number of places
+        env_vars = ["HOME","HOMEDRIVE", "HOMEPATH","USERPROFILE","SYSTEMDRIVE"]
+        env_dirs = [os.environ[e] for e in env_vars if os.environ.get(e,None)]
+
+        # also try the root/cur dirs
+        env_dirs += ["C:", ""]
+
+        # possible filenames
+        file_names = [".netrc", "_netrc"]
+
+        # all possible paths
+        paths = [os.path.join(dir,fn) for dir in env_dirs for fn in file_names]
+    else:
+        # on *nix just put None, and the correct default will be used
+        paths = [None]
+
+    # try the paths one by one and return the first one that works
+    creds = None
+    for p in paths:
+        try:
+            auths = netrc.netrc(p).authenticators(authenticator)
+            creds = (auths[0], auths[2])
+            print "Credentials found in .netrc file"
+            break
+        except (IOError, TypeError, netrc.NetrcParseError) as e:
+            pass
+
+    return creds
 
 class EdXBrowser(object):
     def __init__(self, config):
@@ -137,7 +180,7 @@ class EdXBrowser(object):
             #         + sanitize_filename(chapter_name) + '/' \
             #         + '%02i.%02i.*' % (i,j)
             #fn = glob.glob(DIRECTORY + nametmpl)
-            nametmpl = os.path.join(DIRECTORY,
+            nametmpl = os.path.join(self._config.directory,
                                     sanitize_filename(course_name, replace_space_with_underscore),
                                     sanitize_filename(chapter_name, replace_space_with_underscore),
                                     '%02i.%02i.*' % (i,j))
@@ -166,7 +209,7 @@ class EdXBrowser(object):
                     #        + sanitize_filename(chapter_name) + '/' \
                     #        + '%02i.%02i.%02i ' % (i,j,k) \
                     #        + sanitize_filename('%s (%s)' % (par_name, video_type)) + '.%(ext)s'
-                    outtmpl = os.path.join(DIRECTORY,
+                    outtmpl = os.path.join(self._config.directory,
                         sanitize_filename(course_name, replace_space_with_underscore),
                         sanitize_filename(chapter_name, replace_space_with_underscore),
                         '%02i.%02i.%02i ' % (i,j,k) + \
@@ -178,16 +221,67 @@ class EdXBrowser(object):
                     pass
 
 if __name__ == '__main__':
-    config.interactive_mode = ('--interactive' in sys.argv)
+    parser = argparse.ArgumentParser(description='Make courses from EdX powered courses available offline.', add_help=True)
+    parser.add_argument("-u", "--username", dest='username', type=str, help='username (if omitted search in profile file, then .netrc used)')
+    parser.add_argument("-p", "--password", dest='password', type=str, help='user''s password')
+    parser.add_argument('-c', "--courses", dest="course_names", nargs="+", metavar='<course name>', type=str, help='one or more course names (e.g. TODO)')
+    parser.add_argument('-w', "--weeks", dest="week_numbers", nargs="+", metavar='<week number>', type=str, help='one or more weeks; -c must be present and specify only one course')
+    parser.add_argument('-r', "--profile", dest="profile", type=str, help='download profile ("10gen", "edx" etc...)', choices=['10gen', 'edx'])
 
-    if config.interactive_mode:
-        sys.argv.remove('--interactive')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-d', "--destdir", dest="destdir", type=str, default=".", help='destination directory for downloaded content')
+    group.add_argument('dest_dir', nargs="?", metavar='<dest_dir (deprecated)>', type=str, help='destination directory; deprecated, use --destdir option)')
 
-    if len(sys.argv) >= 2:
-        DIRECTORY = sys.argv[-1].strip('"')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-i', "--interactive", dest="interactive_mode", help='run in interactive mode; cannot use with --gui', action="store_true")
+    group.add_argument('-g', "--gui", dest="gui_mode", help='show GUI menu to choose course(s)/week(s) for download; cannot use with --interactive', action="store_true")
+
+    #parser.add_argument("-n", dest='ignorefiles', type=str, default="", help='comma-separated list of file extensions to skip, e.g., "ppt,srt,pdf"')
+    #parser.add_argument("-q", dest='parser', type=str, default=CourseraDownloader.DEFAULT_PARSER,
+    #                    help="the html parser to use, see http://www.crummy.com/software/BeautifulSoup/bs4/doc/#installing-a-parser")
+    #parser.add_argument("-x", dest='proxy', type=str, default=None, help="proxy to use, e.g., foo.bar.com:3125")
+    #parser.add_argument("--reverse-sections", dest='reverse', action="store_true",
+    #                    default=False, help="download and save the sections in reverse order")
+    args = parser.parse_args()
+    print args
+
+    import config
+    # search for login credentials in .netrc file if username hasn't been provided in command-line args
+    username, password = args.username, args.password
+    netrc_password = None
+    if not username and hasattr(config, 'EMAIL'):
+        username = config.EMAIL
+    if not username:
+        creds = get_netrc_creds(config.DOMAIN)
+        if creds:
+            username, netrc_password = creds
+        else:
+            #raise Exception("No username passed and no .netrc credentials found, unable to login")
+            pass
+    if not username:
+        username = raw_input('Enter username for %s: ' % config.DOMAIN)
+    if not password and hasattr(config, 'PASSWORD'):
+        password = config.PASSWORD
+    if not password:
+        password = netrc_password
+        # prompt the user for his password if not specified
+    if not password:
+        password = getpass.getpass('Enter password for %s at %s: ' % (username, config.DOMAIN))
+
+    config.EMAIL = username
+    config.PASSWORD = password
+
+    config.interactive_mode = args.interactive_mode
+    config.gui_mode = args.gui_mode
+
+    config.directory = None
+    if args.dest_dir:
+        print "Positional argument for destination directory is deprecated, please use --destdir or -d option"
+        config.directory = args.dest_dir
     else:
-        DIRECTORY = os.path.curdir
-    print 'Downloading to ''%s'' directory' % DIRECTORY
+        config.directory = args.destdir
+        pass
+    print 'Downloading to ''%s'' directory' % config.directory
 
     edxb = EdXBrowser(config)
     edxb.login()

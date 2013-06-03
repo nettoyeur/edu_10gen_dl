@@ -21,19 +21,6 @@ from youtube_dl.FileDownloader import FileDownloader
 from youtube_dl.InfoExtractors  import YoutubeIE
 from youtube_dl.utils import sanitize_filename
 
-import config
-
-replace_space_with_underscore = True
-base_url = 'https://'+config.DOMAIN
-# Dirty hack for differences in 10gen and edX implementation
-if 'edx' in config.DOMAIN.split('.'):
-    login_url = '/login_ajax'
-else:
-    login_url = '/login'
-
-dashboard_url = '/dashboard'
-youtube_url = 'http://www.youtube.com/watch?v='
-
 def makeCsrf():
     t = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
     e = 24
@@ -42,12 +29,12 @@ def makeCsrf():
         csrftoken.append(t[int(floor(random()*len(t)))])
     return ''.join(csrftoken)
 
-def csrfCookie(csrftoken):
+def csrfCookie(csrftoken, domain):
     return mechanize.Cookie(version=0,
             name='csrftoken',
             value=csrftoken,
             port=None, port_specified=False,
-            domain=config.DOMAIN,
+            domain=domain,
             domain_specified=False,
             domain_initial_dot=False,
             path='/', path_specified=True,
@@ -97,22 +84,22 @@ def get_netrc_creds(authenticator):
 
 class EdXBrowser(object):
     def __init__(self, config):
+        self._config = config
         self._br = mechanize.Browser()
         self._cj = mechanize.LWPCookieJar()
         csrftoken = makeCsrf()
-        self._cj.set_cookie(csrfCookie(csrftoken))
+        self._cj.set_cookie(csrfCookie(csrftoken, self._config['DOMAIN']))
         self._br.set_handle_robots(False)
         self._br.set_cookiejar(self._cj)
         self._br.addheaders.append(('X-CSRFToken',csrftoken))
         self._br.addheaders.append(('Referer',base_url))
         self._logged_in = False
-        self._fd = FileDownloader(config.YDL_PARAMS)
+        self._fd = FileDownloader(self._config.get('YDL_PARAMS'))
         self._fd.add_info_extractor(YoutubeIE())
-        self._config = config
 
     def login(self):
         try:
-            login_resp = self._br.open(base_url + login_url, urlencode({'email':self._config.EMAIL, 'password':self._config.PASSWORD}))
+            login_resp = self._br.open(base_url + login_url, urlencode({'email':self._config['EMAIL'], 'password':self._config['PASSWORD']}))
             login_state = json.loads(login_resp.read())
             self._logged_in = login_state.get('success')
             if not self._logged_in:
@@ -132,7 +119,7 @@ class EdXBrowser(object):
                 course_url = my_course.a['href']
                 course_name = my_course.h3.text
                 
-                if self._config.interactive_mode:
+                if self._config['interactive_mode']:
                     launch_download_msg = 'Download the course [%s] from %s? (y/n) ' % (course_name, course_url)
                     launch_download = raw_input(launch_download_msg)
                     if (launch_download.lower() == "n"):
@@ -156,7 +143,7 @@ class EdXBrowser(object):
             for chapter in chapters:
                 chapter_name = chapter.find('h3').find('a').text
 
-                if self._config.interactive_mode:
+                if self._config['interactive_mode']:
                     launch_download_msg = 'Download the chapter [%s - %s]? (y/n) ' % (course_name, chapter_name)
                     launch_download = raw_input(launch_download_msg)
                     if (launch_download.lower() == "n"):
@@ -180,7 +167,7 @@ class EdXBrowser(object):
             #         + sanitize_filename(chapter_name) + '/' \
             #         + '%02i.%02i.*' % (i,j)
             #fn = glob.glob(DIRECTORY + nametmpl)
-            nametmpl = os.path.join(self._config.directory,
+            nametmpl = os.path.join(self._config['directory'],
                                     sanitize_filename(course_name, replace_space_with_underscore),
                                     sanitize_filename(chapter_name, replace_space_with_underscore),
                                     '%02i.%02i.*' % (i,j))
@@ -209,7 +196,7 @@ class EdXBrowser(object):
                     #        + sanitize_filename(chapter_name) + '/' \
                     #        + '%02i.%02i.%02i ' % (i,j,k) \
                     #        + sanitize_filename('%s (%s)' % (par_name, video_type)) + '.%(ext)s'
-                    outtmpl = os.path.join(self._config.directory,
+                    outtmpl = os.path.join(self._config['directory'],
                         sanitize_filename(course_name, replace_space_with_underscore),
                         sanitize_filename(chapter_name, replace_space_with_underscore),
                         '%02i.%02i.%02i ' % (i,j,k) + \
@@ -220,13 +207,51 @@ class EdXBrowser(object):
                     #print "Error: %s" % e
                     pass
 
+replace_space_with_underscore = True
+youtube_url = 'http://www.youtube.com/watch?v='
+
+base_url = None
+login_url = '/login'
+dashboard_url = '/dashboard'
+
+def setup_urls(config):
+    global base_url, login_url, dashboard_url
+    domain = config['DOMAIN']
+    base_url = 'https://' + domain
+    # Dirty hack for differences in 10gen and edX implementation
+    if 'edx' in domain.split('.'):
+        login_url = '/login_ajax'
+    else:
+        login_url = '/login'
+    dashboard_url = '/dashboard'
+
+def read_config(profile):
+    """if profile:
+        #exec "import %s" % args.profile
+        cfg_parser = ConfigParser.ConfigParser()
+        if profile not in cfg_parser.sections():
+            raise Exception("Profile '%s' is not defined" % profile)
+    else:
+    """
+    import config
+    cfg_dict = {}
+    if hasattr(config, 'DOMAIN'):
+        cfg_dict['DOMAIN'] = config.DOMAIN
+    if hasattr(config, 'EMAIL'):
+        cfg_dict['EMAIL'] = config.EMAIL
+    if hasattr(config, 'PASSWORD'):
+        cfg_dict['PASSWORD'] = config.PASSWORD
+    if hasattr(config, 'YDL_PARAMS'):
+        cfg_dict['YDL_PARAMS'] = config.YDL_PARAMS
+    return cfg_dict
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Make courses from EdX powered courses available offline.', add_help=True)
     parser.add_argument("-u", "--username", dest='username', type=str, help='username (if omitted search in profile file, then .netrc used)')
     parser.add_argument("-p", "--password", dest='password', type=str, help='user''s password')
     parser.add_argument('-c', "--courses", dest="course_names", nargs="+", metavar='<course name>', type=str, help='one or more course names (e.g. TODO)')
     parser.add_argument('-w', "--weeks", dest="week_numbers", nargs="+", metavar='<week number>', type=str, help='one or more weeks; -c must be present and specify only one course')
-    parser.add_argument('-r', "--profile", dest="profile", type=str, help='download profile ("10gen", "edx" etc...)', choices=['10gen', 'edx'])
+    parser.add_argument('-r', "--profile", dest="profile", type=str, help='download profile ("10gen", "edx" etc...)')
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-d', "--destdir", dest="destdir", type=str, default=".", help='destination directory for downloaded content')
@@ -236,53 +261,50 @@ if __name__ == '__main__':
     group.add_argument('-i', "--interactive", dest="interactive_mode", help='run in interactive mode; cannot use with --gui', action="store_true")
     group.add_argument('-g', "--gui", dest="gui_mode", help='show GUI menu to choose course(s)/week(s) for download; cannot use with --interactive', action="store_true")
 
-    #parser.add_argument("-n", dest='ignorefiles', type=str, default="", help='comma-separated list of file extensions to skip, e.g., "ppt,srt,pdf"')
     #parser.add_argument("-q", dest='parser', type=str, default=CourseraDownloader.DEFAULT_PARSER,
     #                    help="the html parser to use, see http://www.crummy.com/software/BeautifulSoup/bs4/doc/#installing-a-parser")
     #parser.add_argument("-x", dest='proxy', type=str, default=None, help="proxy to use, e.g., foo.bar.com:3125")
-    #parser.add_argument("--reverse-sections", dest='reverse', action="store_true",
-    #                    default=False, help="download and save the sections in reverse order")
     args = parser.parse_args()
-    print args
+    #print args
 
-    import config
+    config = read_config(args.profile)
     # search for login credentials in .netrc file if username hasn't been provided in command-line args
     username, password = args.username, args.password
     netrc_password = None
-    if not username and hasattr(config, 'EMAIL'):
-        username = config.EMAIL
     if not username:
-        creds = get_netrc_creds(config.DOMAIN)
+        username = config.get('EMAIL', None)
+    if not username:
+        creds = get_netrc_creds(config['DOMAIN'])
         if creds:
             username, netrc_password = creds
         else:
             #raise Exception("No username passed and no .netrc credentials found, unable to login")
             pass
     if not username:
-        username = raw_input('Enter username for %s: ' % config.DOMAIN)
-    if not password and hasattr(config, 'PASSWORD'):
-        password = config.PASSWORD
+        username = raw_input('Enter username for %s: ' % config['DOMAIN'])
+    if not password:
+        password = config.get('PASSWORD', None)
     if not password:
         password = netrc_password
         # prompt the user for his password if not specified
     if not password:
-        password = getpass.getpass('Enter password for %s at %s: ' % (username, config.DOMAIN))
+        password = getpass.getpass('Enter password for %s at %s: ' % (username, config['DOMAIN']))
 
-    config.EMAIL = username
-    config.PASSWORD = password
+    config['EMAIL'] = username
+    config['PASSWORD'] = password
 
-    config.interactive_mode = args.interactive_mode
-    config.gui_mode = args.gui_mode
+    config['interactive_mode'] = args.interactive_mode
+    config['gui_mode'] = args.gui_mode
 
-    config.directory = None
     if args.dest_dir:
         print "Positional argument for destination directory is deprecated, please use --destdir or -d option"
-        config.directory = args.dest_dir
+        config['directory'] = args.dest_dir
     else:
-        config.directory = args.destdir
+        config['directory'] = args.destdir
         pass
-    print 'Downloading to ''%s'' directory' % config.directory
+    print 'Downloading to ''%s'' directory' % config['directory']
 
+    setup_urls(config)
     edxb = EdXBrowser(config)
     edxb.login()
     print 'Found the following courses:'

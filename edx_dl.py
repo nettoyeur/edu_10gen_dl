@@ -18,30 +18,32 @@ from random import random
 from urllib import urlencode
 
 from youtube_dl.FileDownloader import FileDownloader
-from youtube_dl.InfoExtractors  import YoutubeIE
+from youtube_dl.InfoExtractors import YoutubeIE
 from youtube_dl.utils import sanitize_filename
+
 
 def makeCsrf():
     t = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
     e = 24
     csrftoken = list()
-    for i in range(0,e):
-        csrftoken.append(t[int(floor(random()*len(t)))])
+    for i in range(0, e):
+        csrftoken.append(t[int(floor(random() * len(t)))])
     return ''.join(csrftoken)
+
 
 def csrfCookie(csrftoken, domain):
     return mechanize.Cookie(version=0,
-            name='csrftoken',
-            value=csrftoken,
-            port=None, port_specified=False,
-            domain=domain,
-            domain_specified=False,
-            domain_initial_dot=False,
-            path='/', path_specified=True,
-            secure=False, expires=None,
-            discard=True,
-            comment=None, comment_url=None,
-            rest={'HttpOnly': None}, rfc2109=False)
+                            name='csrftoken',
+                            value=csrftoken,
+                            port=None, port_specified=False,
+                            domain=domain,
+                            domain_specified=False,
+                            domain_initial_dot=False,
+                            path='/', path_specified=True,
+                            secure=False, expires=None,
+                            discard=True,
+                            comment=None, comment_url=None,
+                            rest={'HttpOnly': None}, rfc2109=False)
 
 
 def get_netrc_creds(authenticator):
@@ -54,8 +56,8 @@ def get_netrc_creds(authenticator):
 
     if platform.system() == 'Windows':
         # where could the netrc file be hiding, try a number of places
-        env_vars = ["HOME","HOMEDRIVE", "HOMEPATH","USERPROFILE","SYSTEMDRIVE"]
-        env_dirs = [os.environ[e] for e in env_vars if os.environ.get(e,None)]
+        env_vars = ["HOME", "HOMEDRIVE", "HOMEPATH", "USERPROFILE", "SYSTEMDRIVE"]
+        env_dirs = [os.environ[e] for e in env_vars if os.environ.get(e, None)]
 
         # also try the root/cur dirs
         env_dirs += ["C:", ""]
@@ -64,7 +66,7 @@ def get_netrc_creds(authenticator):
         file_names = [".netrc", "_netrc"]
 
         # all possible paths
-        paths = [os.path.join(dir,fn) for dir in env_dirs for fn in file_names]
+        paths = [os.path.join(d, fn) for d in env_dirs for fn in file_names]
     else:
         # on *nix just put None, and the correct default will be used
         paths = [None]
@@ -82,6 +84,7 @@ def get_netrc_creds(authenticator):
 
     return creds
 
+
 class EdXBrowser(object):
     def __init__(self, config):
         self._config = config
@@ -91,15 +94,16 @@ class EdXBrowser(object):
         self._cj.set_cookie(csrfCookie(csrftoken, self._config['DOMAIN']))
         self._br.set_handle_robots(False)
         self._br.set_cookiejar(self._cj)
-        self._br.addheaders.append(('X-CSRFToken',csrftoken))
-        self._br.addheaders.append(('Referer',base_url))
+        self._br.addheaders.append(('X-CSRFToken', csrftoken))
+        self._br.addheaders.append(('Referer', base_url))
         self._logged_in = False
         self._fd = FileDownloader(self._config.get('YDL_PARAMS'))
         self._fd.add_info_extractor(YoutubeIE())
 
     def login(self):
         try:
-            login_resp = self._br.open(base_url + login_url, urlencode({'email':self._config['EMAIL'], 'password':self._config['PASSWORD']}))
+            login_resp = self._br.open(base_url + login_url, urlencode(
+                {'email': self._config['EMAIL'], 'password': self._config['PASSWORD']}))
             login_state = json.loads(login_resp.read())
             self._logged_in = login_state.get('success')
             if not self._logged_in:
@@ -114,32 +118,53 @@ class EdXBrowser(object):
             dashboard = self._br.open(base_url + dashboard_url)
             dashboard_soup = BeautifulSoup(dashboard.read())
             my_courses = dashboard_soup.findAll('article', 'my-course')
-            i = 0
             for my_course in my_courses:
                 course_url = my_course.a['href']
                 course_name = my_course.h3.text
-                
-                if self._config['interactive_mode']:
-                    launch_download_msg = 'Download the course [%s] from %s? (y/n) ' % (course_name, course_url)
-                    launch_download = raw_input(launch_download_msg)
-                    if (launch_download.lower() == "n"):
-                        continue
+                courseware_url = re.sub(r'\/info$', '/courseware', course_url)
+                self.courses.append({'name': course_name, 'url': courseware_url})
 
-                i += 1
-                courseware_url = re.sub(r'\/info$','/courseware',course_url)
-                self.courses.append({'name':course_name, 'url':courseware_url})
-                print '[%02i] %s' % (i, course_name)
+    def print_courses(self):
+        for i in range(len(self.courses)):
+            print '[%02i] %s' % (i, self.courses[i]['name'])
+
+    def filter_interactive_courses(self):
+        if self._config['interactive_mode']:
+            confirmed = []
+            for course in self.courses:
+                course_name = course['name']
+                course_url = course['url']
+                launch_download_msg = 'Download the course [%s] from %s? (y/n) ' % (course_name, course_url)
+                launch_download = raw_input(launch_download_msg)
+                if launch_download.lower() == "n":
+                    continue
+                confirmed.append(course)
+            self.courses = confirmed
+        pass
+
+    def filter_cmd_line_courses(self):
+        if self._config['course_names']:
+            selected = self._config['course_names']
+
+            def fltr(course):
+                for s in selected:
+                    if course['url'].find('/{}/'.format(s)) >= 0:
+                        return True
+                return False
+
+            self.courses = filter(fltr, self.courses)
+        pass
 
     def list_chapters(self, course_i):
         self.paragraphs = []
-        if course_i < len(self.courses) and course_i >= 0:
+        if len(self.courses) > course_i >= 0:
             print "Getting chapters..."
             course = self.courses[course_i]
             course_name = course['name']
-            courseware = self._br.open(base_url+course['url'])
+            courseware = self._br.open(base_url + course['url'])
             courseware_soup = BeautifulSoup(courseware.read())
-            chapters = courseware_soup.findAll('div','chapter')
-            i = 0
+            chapters = courseware_soup.findAll('div', 'chapter')
+            chapter_index = 0
             for chapter in chapters:
                 chapter_name = chapter.find('h3').find('a').text
 
@@ -148,45 +173,42 @@ class EdXBrowser(object):
                     launch_download = raw_input(launch_download_msg)
                     if (launch_download.lower() == "n"):
                         continue
-                
-                i += 1
-                print '\t[%02i] %s' % (i, chapter_name)
+
+                chapter_index += 1
+                print '\t[%02i] %s' % (chapter_index, chapter_name)
                 paragraphs = chapter.find('ul').findAll('li')
-                j = 0
+                paragraph_index = 0
                 for paragraph in paragraphs:
-                    j += 1
+                    paragraph_index += 1
                     par_name = paragraph.p.text
                     par_url = paragraph.a['href']
-                    self.paragraphs.append((course_name, i, j, chapter_name, par_name, par_url))
-                    print '\t\t[%02i.%02i] %s' % (i, j, par_name)
+                    self.paragraphs.append(
+                        (course_name, chapter_index, paragraph_index, chapter_name, par_name, par_url))
+                    print '\t\t[%02i.%02i] %s' % (chapter_index, paragraph_index, par_name)
 
     def download(self):
         print "\n-----------------------\nStart downloading\n-----------------------\n"
         for (course_name, i, j, chapter_name, par_name, url) in self.paragraphs:
-            #nametmpl = sanitize_filename(course_name) + '/' \
-            #         + sanitize_filename(chapter_name) + '/' \
-            #         + '%02i.%02i.*' % (i,j)
-            #fn = glob.glob(DIRECTORY + nametmpl)
             nametmpl = os.path.join(self._config['directory'],
                                     sanitize_filename(course_name, replace_space_with_underscore),
                                     sanitize_filename(chapter_name, replace_space_with_underscore),
-                                    '%02i.%02i.*' % (i,j))
+                                    '%02i.%02i.*' % (i, j))
             fn = glob.glob(nametmpl)
-            
+
             if fn:
                 print "Processing of %s skipped" % nametmpl
                 continue
             print "Processing %s..." % nametmpl
             par = self._br.open(base_url + url)
             par_soup = BeautifulSoup(par.read())
-            contents = par_soup.findAll('div','seq_contents')
+            contents = par_soup.findAll('div', 'seq_contents')
             k = 0
             for content in contents:
                 #print "Content: %s" % content
                 content_soup = BeautifulSoup(content.text)
                 try:
                     video_type = content_soup.h2.text.strip()
-                    video_stream = content_soup.find('div','video')['data-streams']
+                    video_stream = content_soup.find('div', 'video')['data-streams']
                     video_id = video_stream.split(':')[1]
                     video_url = youtube_url + video_id
                     k += 1
@@ -197,15 +219,17 @@ class EdXBrowser(object):
                     #        + '%02i.%02i.%02i ' % (i,j,k) \
                     #        + sanitize_filename('%s (%s)' % (par_name, video_type)) + '.%(ext)s'
                     outtmpl = os.path.join(self._config['directory'],
-                        sanitize_filename(course_name, replace_space_with_underscore),
-                        sanitize_filename(chapter_name, replace_space_with_underscore),
-                        '%02i.%02i.%02i ' % (i,j,k) + \
-                        sanitize_filename('%s (%s)' % (par_name, video_type), replace_space_with_underscore) + '.%(ext)s')
+                                           sanitize_filename(course_name, replace_space_with_underscore),
+                                           sanitize_filename(chapter_name, replace_space_with_underscore),
+                                           '%02i.%02i.%02i ' % (i, j, k) + \
+                                           sanitize_filename('%s (%s)' % (par_name, video_type),
+                                                             replace_space_with_underscore) + '.%(ext)s')
                     self._fd.params['outtmpl'] = outtmpl
                     self._fd.download([video_url])
                 except Exception as e:
                     #print "Error: %s" % e
                     pass
+
 
 replace_space_with_underscore = True
 youtube_url = 'http://www.youtube.com/watch?v='
@@ -213,6 +237,7 @@ youtube_url = 'http://www.youtube.com/watch?v='
 base_url = None
 login_url = '/login'
 dashboard_url = '/dashboard'
+
 
 def setup_urls(config):
     global base_url, login_url, dashboard_url
@@ -225,6 +250,7 @@ def setup_urls(config):
         login_url = '/login'
     dashboard_url = '/dashboard'
 
+
 def read_config(profile):
     """if profile:
         #exec "import %s" % args.profile
@@ -234,6 +260,7 @@ def read_config(profile):
     else:
     """
     import config
+
     cfg_dict = {}
     if hasattr(config, 'DOMAIN'):
         cfg_dict['DOMAIN'] = config.DOMAIN
@@ -245,21 +272,31 @@ def read_config(profile):
         cfg_dict['YDL_PARAMS'] = config.YDL_PARAMS
     return cfg_dict
 
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Make courses from EdX powered courses available offline.', add_help=True)
-    parser.add_argument("-u", "--username", dest='username', type=str, help='username (if omitted search in profile file, then .netrc used)')
+    parser = argparse.ArgumentParser(description='Make courses from EdX powered courses available offline.',
+                                     add_help=True)
+    parser.add_argument("-u", "--username", dest='username', type=str,
+                        help='username (if omitted search in profile file, then .netrc used)')
     parser.add_argument("-p", "--password", dest='password', type=str, help='user''s password')
-    parser.add_argument('-c', "--courses", dest="course_names", nargs="+", metavar='<course name>', type=str, help='one or more course names (e.g. TODO)')
-    parser.add_argument('-w', "--weeks", dest="week_numbers", nargs="+", metavar='<week number>', type=str, help='one or more weeks; -c must be present and specify only one course')
+    parser.add_argument('-c', "--courses", dest="course_names", nargs="+", metavar='<course name>', type=str,
+                        help='one or more course names (better use course id in the url e.g. "M101" for 10gen or "CS188.1x" for EdX )')
+    parser.add_argument('-w', "--weeks", dest="week_numbers", nargs="+", metavar='<week number>', type=str,
+                        help='one or more weeks; -c must be present and specify only one course')
     parser.add_argument('-r', "--profile", dest="profile", type=str, help='download profile ("10gen", "edx" etc...)')
 
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('-d', "--destdir", dest="destdir", type=str, default=".", help='destination directory for downloaded content')
-    group.add_argument('dest_dir', nargs="?", metavar='<dest_dir (deprecated)>', type=str, help='destination directory; deprecated, use --destdir option)')
+    group.add_argument('-d', "--destdir", dest="destdir", type=str, default=".",
+                       help='destination directory for downloaded content')
+    group.add_argument('dest_dir', nargs="?", metavar='<dest_dir (deprecated)>', type=str,
+                       help='destination directory; deprecated, use --destdir option)')
 
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('-i', "--interactive", dest="interactive_mode", help='run in interactive mode; cannot use with --gui', action="store_true")
-    group.add_argument('-g', "--gui", dest="gui_mode", help='show GUI menu to choose course(s)/week(s) for download; cannot use with --interactive', action="store_true")
+    group.add_argument('-i', "--interactive", dest="interactive_mode",
+                       help='run in interactive mode; cannot use with --gui', action="store_true")
+    group.add_argument('-g', "--gui", dest="gui_mode",
+                       help='show GUI menu to choose course(s)/week(s) for download; cannot use with --interactive',
+                       action="store_true")
 
     #parser.add_argument("-q", dest='parser', type=str, default=CourseraDownloader.DEFAULT_PARSER,
     #                    help="the html parser to use, see http://www.crummy.com/software/BeautifulSoup/bs4/doc/#installing-a-parser")
@@ -296,6 +333,13 @@ if __name__ == '__main__':
     config['interactive_mode'] = args.interactive_mode
     config['gui_mode'] = args.gui_mode
 
+    if args.week_numbers and args.course_names and len(args.course_names) > 1:
+        raise Exception("You must specify only one course if you use -w option")
+    config['course_names'] = args.course_names
+    config['week_numbers'] = args.week_numbers
+    if args.week_numbers:
+        print "-w or --weeks are not supported yet, ignored"
+
     if args.dest_dir:
         print "Positional argument for destination directory is deprecated, please use --destdir or -d option"
         config['directory'] = args.dest_dir
@@ -307,8 +351,12 @@ if __name__ == '__main__':
     setup_urls(config)
     edxb = EdXBrowser(config)
     edxb.login()
-    print 'Found the following courses:'
     edxb.list_courses()
+    edxb.filter_cmd_line_courses()
+    edxb.filter_interactive_courses()
+    print 'Found the following courses:'
+    edxb.print_courses()
+
     if edxb.courses:
         print "Processing..."
     else:

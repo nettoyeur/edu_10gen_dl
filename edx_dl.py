@@ -118,11 +118,13 @@ class EdXBrowser(object):
             dashboard = self._br.open(base_url + dashboard_url)
             dashboard_soup = BeautifulSoup(dashboard.read())
             my_courses = dashboard_soup.findAll('article', 'my-course')
+            course_index = 0
             for my_course in my_courses:
+                course_index += 1
                 course_url = my_course.a['href']
                 course_name = my_course.h3.text
                 courseware_url = re.sub(r'\/info$', '/courseware', course_url)
-                self.courses.append({'name': course_name, 'url': courseware_url})
+                self.courses.append({'name': course_name, 'url': courseware_url, 'index': course_index})
 
     def print_courses(self):
         for i in range(len(self.courses)):
@@ -167,6 +169,7 @@ class EdXBrowser(object):
             chapter_index = 0
             for chapter in chapters:
                 chapter_name = chapter.find('h3').find('a').text
+                chapter_index += 1
 
                 if self._config['interactive_mode']:
                     launch_download_msg = 'Download the chapter [%s - %s]? (y/n) ' % (course_name, chapter_name)
@@ -174,7 +177,6 @@ class EdXBrowser(object):
                     if (launch_download.lower() == "n"):
                         continue
 
-                chapter_index += 1
                 print '\t[%02i] %s' % (chapter_index, chapter_name)
                 paragraphs = chapter.find('ul').findAll('li')
                 paragraph_index = 0
@@ -213,11 +215,6 @@ class EdXBrowser(object):
                     video_url = youtube_url + video_id
                     k += 1
                     print '[%02i.%02i.%02i] %s (%s)' % (i, j, k, par_name, video_type)
-                    #f.writelines(video_url+'\n')
-                    #outtmpl = DIRECTORY + sanitize_filename(course_name) + '/' \
-                    #        + sanitize_filename(chapter_name) + '/' \
-                    #        + '%02i.%02i.%02i ' % (i,j,k) \
-                    #        + sanitize_filename('%s (%s)' % (par_name, video_type)) + '.%(ext)s'
                     outtmpl = os.path.join(self._config['directory'],
                                            sanitize_filename(course_name, replace_space_with_underscore),
                                            sanitize_filename(chapter_name, replace_space_with_underscore),

@@ -26,6 +26,25 @@ Optionally set another options in `config.py` like `writesubtitles` to enable su
 
 ### Usage:
 
-+ `python edx_dl.py`
-+ `python edx_dl.py c:\Users\MyUser\Lectures\`
-+ `python edx_dl.py --interactive c:\Users\MyUser\Lectures\`
+```
+usage: edx_dl.py [-h] [-u USERNAME] [-p PASSWORD]
+                 [-c <course name> [<course name> ...]]
+                 [-d DESTDIR] [-i]
+
+Make courses from EdX powered courses available offline.
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -u USERNAME, --username USERNAME
+                        username (if omitted search in profile file, then
+                        .netrc used)
+  -p PASSWORD, --password PASSWORD
+                        users password
+  -c <course name> [<course name> ...], --courses <course name> [<course name> ...]
+                        one or more course names (better use course id in the
+                        url e.g. "M101" for 10gen or "CS188.1x" for EdX )
+  -d DESTDIR, --destdir DESTDIR
+                        destination directory for downloaded content
+  -i, --interactive     run in interactive mode
+
+```

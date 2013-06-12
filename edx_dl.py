@@ -329,6 +329,8 @@ if __name__ == '__main__':
 
     config['interactive_mode'] = args.interactive_mode
     config['gui_mode'] = args.gui_mode
+    if args.gui_mode:
+        print "-g or --gui are not supported yet, ignored"
 
     if args.week_numbers and args.course_names and len(args.course_names) > 1:
         raise Exception("You must specify only one course if you use -w option")

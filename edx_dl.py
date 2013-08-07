@@ -1,5 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+import ConfigParser
 
 import glob
 import json
@@ -228,6 +229,14 @@ class EdXBrowser(object):
                     pass
 
 
+class Profile(object):
+    def __init__(self, domain, base_url, login_url, dashboard_url):
+        self.domain = domain
+        self.base_url = base_url
+        self.login_url = login_url
+        self.dashboard_url = dashboard_url
+
+
 replace_space_with_underscore = True
 youtube_url = 'http://www.youtube.com/watch?v='
 
@@ -246,19 +255,30 @@ def setup_urls(config):
     else:
         login_url = '/login'
     dashboard_url = '/dashboard'
+    return Profile(domain, base_url, login_url, dashboard_url)
 
 
-def read_config(profile):
-    """if profile:
-        #exec "import %s" % args.profile
-        cfg_parser = ConfigParser.ConfigParser()
+def read_config_from_file(config_file, profile):
+    if not os.path.isfile(config_file):
+        raise Exception("Can't find '%s' configuration" % config_file)
+    cfg_parser = ConfigParser.RawConfigParser()
+    cfg_parser.read(config_file)
+    if profile:
         if profile not in cfg_parser.sections():
             raise Exception("Profile '%s' is not defined" % profile)
-    else:
-    """
-    import config
+    import ast
+    cfg_dict = {
+        'DOMAIN': cfg_parser.get(profile, 'DOMAIN'),
+        'EMAIL': cfg_parser.get(profile, 'EMAIL'),
+        'PASSWORD': cfg_parser.get(profile, 'PASSWORD'),
+        'YDL_PARAMS': ast.literal_eval(cfg_parser.get(profile, 'YDL_PARAMS'))
+    }
+    return cfg_dict
 
-    cfg_dict = {}
+
+def read_config_from_py():
+    import config
+    cfg_dict = dict()
     if hasattr(config, 'DOMAIN'):
         cfg_dict['DOMAIN'] = config.DOMAIN
     if hasattr(config, 'EMAIL'):
@@ -270,24 +290,37 @@ def read_config(profile):
     return cfg_dict
 
 
-if __name__ == '__main__':
+def read_config(profile, config_file):
+    try:
+        import config
+        print "\nYou are using config.py for configuration which is deprecated! Consider switching to using config file (see config.cfg as a reference) and delete config.py.\n"
+        #if interactive:
+        #    raw_input("Press <Enter> to continue")
+        return read_config_from_py()
+    except:
+        # no config.py => using config file
+        return read_config_from_file(config_file, profile)
+
+
+
+def setup_arguments():
     parser = argparse.ArgumentParser(description='Make courses from EdX powered courses available offline.',
                                      add_help=True)
     parser.add_argument("-u", "--username", dest='username', type=str,
                         help='username (if omitted search in profile file, then .netrc used)')
     parser.add_argument("-p", "--password", dest='password', type=str, help='user''s password')
     parser.add_argument('-c', "--courses", dest="course_names", nargs="+", metavar='<course name>', type=str,
-                        help='one or more course names (better use course id in the url e.g. "M101" for 10gen or "CS188.1x" for EdX )')
+                        help='one or more course names (better use course id from the url e.g. "M101" for 10gen or "CS188.1x" for EdX )')
     parser.add_argument('-w', "--weeks", dest="week_numbers", nargs="+", metavar='<week number>', type=str,
                         help='one or more weeks; -c must be present and specify only one course')
-    parser.add_argument('-r', "--profile", dest="profile", type=str, help='download profile ("10gen", "edx" etc...)')
-
+    parser.add_argument('-f', "--config-file", dest="config_file", nargs="?", metavar='<configuration file>', type=str,
+                        default="config.cfg", help='configuration file to use')
+    parser.add_argument('-r', "--profile", dest="profile", type=str, help='download profile ("10gen", "edx" etc...), must present as a section in the configuration file')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-d', "--destdir", dest="destdir", type=str, default=".",
                        help='destination directory for downloaded content')
     group.add_argument('dest_dir', nargs="?", metavar='<dest_dir (deprecated)>', type=str,
                        help='destination directory; deprecated, use --destdir option)')
-
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-i', "--interactive", dest="interactive_mode",
                        help='run in interactive mode; cannot use with --gui', action="store_true")
@@ -295,13 +328,18 @@ if __name__ == '__main__':
                        help='show GUI menu to choose course(s)/week(s) for download; cannot use with --interactive',
                        action="store_true")
 
+    #parser.add_argument('-n', "--dry-run", dest="profile", type=str, help='do not download just print')
     #parser.add_argument("-q", dest='parser', type=str, default=CourseraDownloader.DEFAULT_PARSER,
     #                    help="the html parser to use, see http://www.crummy.com/software/BeautifulSoup/bs4/doc/#installing-a-parser")
     #parser.add_argument("-x", dest='proxy', type=str, default=None, help="proxy to use, e.g., foo.bar.com:3125")
+    return parser
+
+def main():
+    parser = setup_arguments()
     args = parser.parse_args()
     #print args
 
-    config = read_config(args.profile)
+    config = read_config(args.profile, args.config_file)
     # search for login credentials in .netrc file if username hasn't been provided in command-line args
     username, password = args.username, args.password
     netrc_password = None
@@ -333,7 +371,7 @@ if __name__ == '__main__':
         print "-g or --gui are not supported yet, ignored"
 
     if args.week_numbers and args.course_names and len(args.course_names) > 1:
-        raise Exception("You must specify only one course if you use -w option")
+        raise Exception("You must specify exactly one course if you use -w option")
     config['course_names'] = args.course_names
     config['week_numbers'] = args.week_numbers
     if args.week_numbers:
@@ -347,7 +385,7 @@ if __name__ == '__main__':
         pass
     print 'Downloading to ''%s'' directory' % config['directory']
 
-    setup_urls(config)
+    profile = setup_urls(config)
     edxb = EdXBrowser(config)
     edxb.login()
     edxb.list_courses()
@@ -365,3 +403,6 @@ if __name__ == '__main__':
         print 'Chapters:'
         edxb.list_chapters(c)
         edxb.download()
+
+if __name__ == '__main__':
+    main()

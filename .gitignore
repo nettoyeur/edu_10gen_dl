@@ -161,3 +161,11 @@ pip-log.txt
 
 # Mac crap
 .DS_Store
+
+# IntelliJ IDEA files
+*.iml
+.idea
+atlassian-ide-plugin.xml
+
+# other
+*.patch
